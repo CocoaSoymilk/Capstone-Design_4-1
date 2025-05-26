@@ -10,7 +10,7 @@ import os
 try:
     from dotenv import load_dotenv
     load_dotenv()
-except:
+except ImportError:
     pass
 
 # Secrets(Cloud) > 환경변수 순서로 불러오기
@@ -25,27 +25,44 @@ st.title("리뷰케어: 긴급 리뷰 모니터링 & 자동 답변")
 
 uploaded_file = st.file_uploader("CSV 파일 업로드", type=['csv'])
 
+def read_csv_with_encoding(file):
+    """여러 인코딩으로 안전하게 읽기"""
+    for enc in ["utf-8-sig", "utf-8", "cp949", "euc-kr", "latin1"]:
+        try:
+            file.seek(0)
+            df = pd.read_csv(file, encoding=enc)
+            if not df.empty:
+                return df
+        except Exception:
+            continue
+    st.error("CSV 파일 인코딩을 알 수 없거나 데이터를 읽지 못했습니다.")
+    return None
+
 if uploaded_file:
-    try:
-        df = pd.read_csv(uploaded_file, encoding='utf-8')
-    except Exception:
-        uploaded_file.seek(0)
-        df = pd.read_csv(uploaded_file, encoding='cp949')
-    if df.empty or 'content' not in df.columns or 'score' not in df.columns:
+    df = read_csv_with_encoding(uploaded_file)
+    if df is None or df.empty or 'content' not in df.columns or 'score' not in df.columns:
         st.error("CSV 파일에 데이터가 없거나 필수 컬럼이 없습니다. (필수: content, score, at)")
         st.stop()
+    # 날짜 컬럼 전처리
     if 'at' in df.columns:
         df['at'] = pd.to_datetime(df['at'], errors='coerce')
     else:
         df['at'] = pd.Timestamp.now()
 
     def get_urgency(row):
+        content = str(row['content'])
+        score = str(row['score'])
+        # 혹시라도 bytes 타입이면 디코딩
+        if isinstance(row['content'], bytes):
+            content = row['content'].decode('utf-8', errors='ignore')
+        if isinstance(row['score'], bytes):
+            score = row['score'].decode('utf-8', errors='ignore')
         prompt = (
             "너는 게임 CS 전담 모델이다. "
             "아래 리뷰에 대해 긴급도를 0~1(실수)로, 이유(reason)를 한글로 1문장으로, "
             "예시와 같이 JSON만 반환해라. 예시: {\"urgency\":0.7,\"reason\":\"1점 리뷰이면서 욕설이 있어 시급\"}. "
             "코드블록, 설명, 다른 문구 없이 JSON만 반환.\n"
-            f"리뷰 평점: {row['score']}★\n리뷰: \"{row['content']}\""
+            f"리뷰 평점: {score}★\n리뷰: \"{content}\""
         )
         resp = openai.chat.completions.create(
             model="gpt-4o-mini",
@@ -56,7 +73,7 @@ if uploaded_file:
             temperature=0.1,
             max_tokens=120
         )
-        out = resp.choices[0].message.content.strip()
+        out = str(resp.choices[0].message.content).strip()
         try:
             if out.startswith("```"):
                 out = out.split("```")[1].strip()
@@ -92,17 +109,18 @@ if uploaded_file:
     with col1:
         for idx, row in criticals.iterrows():
             st.markdown(f"**{row['at']} - {row['score']}★**")
-            st.write(row['content'])
+            st.write(str(row['content']))
             st.caption(f"긴급도: {row['urgency']:.2f} / 이유: {row['reason']}")
             st.divider()
 
     with col2:
         sel_idx = st.number_input("몇 번째 리뷰에 답변할까요? (1~10)", min_value=1, max_value=min(10, len(criticals)), value=1, step=1) - 1
         selected = criticals.iloc[sel_idx]
-        st.markdown(f"### 리뷰\n{selected['content']}")
+        review_content = str(selected['content'])
+        st.markdown(f"### 리뷰\n{review_content}")
         st.markdown("> **답변 가이드라인**\n- 공감(불편 인정)\n- 구체적 사과\n- 원인 설명(가능한 경우)\n- 조치 예정 or 고객센터 유도\n- 친근한 마무리")
         prompt = (
-            f"리뷰: \"{selected['content']}\"\n"
+            f"리뷰: \"{review_content}\"\n"
             "위 리뷰에 대해 CS 담당자 입장에서 답변을 작성할 때, "
             "공감, 사과, 해결방안, 후속 안내를 포함하고, "
             "\"현질\" 등 은어/비공식어/비속어/은유적 표현이 있으면 공식적이고 중립적인 표현으로 순화해서 작성해라. "
@@ -117,7 +135,8 @@ if uploaded_file:
             temperature=0.2,
             max_tokens=300
         )
-        st.text_area("추천 답변 예시(비공식어 자동 순화)", value=resp2.choices[0].message.content, height=200)
+        answer = str(resp2.choices[0].message.content)
+        st.text_area("추천 답변 예시(비공식어 자동 순화)", value=answer, height=200)
 
     st.subheader("리뷰 통계")
     st.bar_chart(preview['score'].value_counts().sort_index())
