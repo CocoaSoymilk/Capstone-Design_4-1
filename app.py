@@ -178,24 +178,11 @@ if uploaded_file:
             answer = resp2.choices[0].message.content
         st.text_area("추천 답변 예시", value=answer, height=210)
 
-    # matplotlib 그래프
-    import matplotlib.pyplot as plt
-    st.subheader("리뷰 통계")
-    fig1, ax1 = plt.subplots()
-    preview['score'] = preview['score'].astype(str)
-    preview['score'].value_counts().sort_index().plot(kind='bar', ax=ax1)
-    ax1.set_xlabel('별점')
-    ax1.set_ylabel('리뷰 수')
-    ax1.set_xticklabels(ax1.get_xticklabels(), rotation=0)
-    st.pyplot(fig1)
+        st.subheader("리뷰 통계")
+    st.bar_chart(preview['score'].value_counts().sort_index())
 
     st.subheader("문제 범주 분포")
-    fig2, ax2 = plt.subplots()
-    preview['category'].value_counts().plot(kind='bar', ax=ax2)
-    ax2.set_xlabel('문제 범주')
-    ax2.set_ylabel('리뷰 수')
-    ax2.set_xticklabels(ax2.get_xticklabels(), rotation=0)
-    st.pyplot(fig2)
+    st.bar_chart(preview['category'].value_counts())
 
 else:
     st.info("CSV 파일을 업로드하면 자동으로 분석됩니다.")
