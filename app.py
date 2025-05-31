@@ -267,7 +267,7 @@ if uploaded_file:
         df['at'] = pd.Timestamp.now()
 
     # 메트릭 카드들
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3 = st.columns(3)
     
     with col1:
         st.markdown(f"""
@@ -287,15 +287,6 @@ if uploaded_file:
         """, unsafe_allow_html=True)
     
     with col3:
-        total_thumbs = df['thumbsUpCount'].sum()
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-value">{total_thumbs:,}</div>
-            <div class="metric-label">👍 총 추천수</div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col4:
         st.markdown(f"""
         <div class="metric-card">
             <div class="metric-value">{N}</div>
@@ -370,19 +361,41 @@ if uploaded_file:
     with tab2:
         st.markdown("### 💬 AI 답변 생성기")
         
-        col1, col2 = st.columns([1, 2])
+        # 선택된 리뷰 표시
+        if 'selected_review_idx' not in st.session_state:
+            st.session_state.selected_review_idx = 0
+        
+        selected_review = criticals.iloc[st.session_state.selected_review_idx]
+        
+        st.markdown("#### 📝 선택된 리뷰")
+        st.markdown(f"""
+        <div style="background: #f8f9fa; padding: 1rem; border-radius: 6px; border-left: 4px solid #495057; margin-bottom: 1rem;">
+            <div style="margin-bottom: 0.5rem;">
+                <strong>긴급도: {selected_review['urgency']:.2f}</strong> | 
+                <strong>카테고리: {selected_review['category']}</strong> | 
+                <strong>별점: {selected_review['score']}★</strong>
+            </div>
+            <div style="color: #212529;">
+                {str(selected_review['content'])}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        col1, col2 = st.columns([1, 1])
         
         with col1:
-            selected_review_idx = st.selectbox(
-                "답변할 리뷰 선택",
-                range(len(criticals)),
-                format_func=lambda x: f"#{x+1} - 긴급도 {criticals.iloc[x]['urgency']:.2f}"
+            st.markdown("#### 🎨 답변 스타일 선택")
+            selected_style = st.radio(
+                "스타일을 선택하세요:",
+                ['공감 중심', '문제 원인 상세', '고객센터 안내'],
+                horizontal=False,
+                help="답변의 톤앤매너를 선택하세요"
             )
         
         with col2:
-            if st.button("✨ AI 답변 생성", use_container_width=True):
-                selected = criticals.iloc[selected_review_idx]
-                review_content = str(selected['content'])
+            st.markdown("#### ✨ 답변 생성")
+            if st.button("AI 답변 생성", use_container_width=True, type="primary"):
+                review_content = str(selected_review['content'])
                 
                 style_dict = {
                     '공감 중심': '이용자의 감정에 최대한 공감하고 불편을 인정하는 답변',
@@ -392,7 +405,7 @@ if uploaded_file:
                 
                 prompt = (
                     f"리뷰: \"{review_content}\"\n"
-                    f"답변 스타일: {style_dict[answer_style]}\n"
+                    f"답변 스타일: {style_dict[selected_style]}\n"
                     "위 리뷰에 대해 CS 담당자 입장에서 공식적이고 중립적으로 답변하라. "
                     "공감, 사과, 해결방안, 후속 안내를 포함하며, "
                     "'현질', '현금박치기', '쪼렙', '오지게' 등 은어·비속어·비공식/은유적 표현은 반드시 '유료 결제', '과금', '유료 아이템 구매', '초보자', '매우' 등 공식적이고 중립적인 용어로 순화하여 답변하라."
@@ -410,12 +423,13 @@ if uploaded_file:
                     )
                     answer = resp.choices[0].message.content
                     
-                    st.markdown("#### 📝 생성된 답변")
-                    st.markdown(f"""
-                    <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 10px; border-left: 4px solid #28a745;">
-                        {answer}
-                    </div>
-                    """, unsafe_allow_html=True)
+                    st.markdown("#### 📋 생성된 답변")
+                    st.text_area(
+                        "답변 내용",
+                        value=answer,
+                        height=200,
+                        help="생성된 답변을 복사하여 사용하세요"
+                    )
     
     with tab3:
         st.markdown("### 📊 분석 결과 통계")
