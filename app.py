@@ -106,19 +106,15 @@ st.markdown("""
     /* 범주 태그 스타일 */
     .category-tag {
         display: inline-block;
-        padding: 0.3rem 0.8rem;
-        border-radius: 20px;
-        font-size: 0.8rem;
-        font-weight: 600;
+        padding: 0.25rem 0.6rem;
+        border-radius: 12px;
+        font-size: 0.75rem;
+        font-weight: 500;
         margin: 0.2rem;
+        background: #f8f9fa;
+        color: #495057;
+        border: 1px solid #e9ecef;
     }
-    
-    .cat-bm { background: #e3f2fd; color: #1976d2; }
-    .cat-tech { background: #f3e5f5; color: #7b1fa2; }
-    .cat-ops { background: #e8f5e8; color: #388e3c; }
-    .cat-ux { background: #fff3e0; color: #f57c00; }
-    .cat-content { background: #fce4ec; color: #c2185b; }
-    .cat-etc { background: #f5f5f5; color: #616161; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -335,7 +331,8 @@ if uploaded_file:
             category_class = get_category_class(row['category'])
             
             # 긴급도에 따른 이모지
-            urgency_emoji = "🔴" if row['urgency'] >= 0.7 else "🟡" if row['urgency'] >= 0.4 else "🟢"
+            urgency_emoji = "●" if row['urgency'] >= 0.7 else "●" if row['urgency'] >= 0.4 else "●"
+            urgency_color = "#dc3545" if row['urgency'] >= 0.7 else "#fd7e14" if row['urgency'] >= 0.4 else "#28a745"
             
             st.markdown(f"""
             <div class="review-card {urgency_class}">
