@@ -70,7 +70,7 @@ def get_llm_urgency(row):
                 {"role": "user", "content": prompt}
             ],
             temperature=0.11,
-            max_tokens=120
+            max_tokens=200
         )
         out = resp.choices[0].message.content.strip()
         if out.startswith("```"):
@@ -159,8 +159,8 @@ if uploaded_file:
                     {"role": "system", "content": "너는 게임 CS 담당자이며 답변 시 반드시 비공식어를 순화할 것."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.22,
-                max_tokens=350
+                temperature=0.1,
+                max_tokens=500
             )
             answer = resp2.choices[0].message.content
         st.text_area("추천 답변 예시", value=answer, height=210)
