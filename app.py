@@ -2,11 +2,8 @@ import streamlit as st
 import pandas as pd
 import openai
 import json
-import matplotlib.pyplot as plt
 
-# Streamlit Cloud에선 st.secrets["OPENAI_API_KEY"] 권장
 OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
-
 openai.api_key = OPENAI_API_KEY
 
 st.set_page_config(page_title="리뷰케어 긴급 리뷰 대시보드", layout="wide")
@@ -25,20 +22,6 @@ def read_csv_with_encoding(file):
             continue
     st.error("CSV 파일 인코딩을 알 수 없거나 데이터를 읽지 못했습니다.")
     return None
-
-def custom_urgency(score, thumbs, score_max=5, thumbs_max=1000):
-    try:
-        s = float(score)
-    except:
-        s = 3.0
-    try:
-        t = int(thumbs)
-    except:
-        t = 0
-    score_term = (score_max - s) / (score_max - 1)
-    thumbs_term = min(t / thumbs_max, 1.0)
-    urgency = 0.35 * score_term + 0.65 * thumbs_term
-    return round(urgency, 3)
 
 @st.cache_data(show_spinner=False)
 def extract_category(contents):
@@ -64,28 +47,32 @@ def extract_category(contents):
         cat_list.append(out)
     return cat_list
 
-def get_llm_reason(row):
+def get_llm_urgency(row):
     content = str(row['content'])
     score = str(row['score'])
     thumbs = str(row['thumbsUpCount'])
     prompt = (
-        "아래 리뷰에 대해, 별점이 낮고 추천수가 높으면 더욱 시급하다고 판단한다. "
-        "긴급도를 0~1(실수)로, 이유를 한글 한 문장으로, 예시와 같이 JSON만 반환해라. "
-        "예시: {\"urgency\":0.9,\"reason\":\"1점이면서 추천수가 매우 높음\"} "
+        "너는 숙련된 게임 CS 분석가다. 아래 게임 리뷰의 전체 내용을 꼼꼼히 읽고, "
+        "별점과 추천수, 그리고 리뷰의 전반적인 맥락과 표현을 바탕으로 '이 리뷰가 게임사에 얼마나 시급하게 대응되어야 할지'를 객관적으로 평가해라. "
+        "특정 키워드가 없어도 맥락상 서비스 안정성, 신뢰성, 금전적 피해, 다수 이용자의 불편, 반복적 신고, 감정적 호소 등 여러 요인을 종합적으로 고려해 시급도를 판단해라. "
+        "별점이 낮거나 추천수가 높거나, 혹은 본문에서 긴급성이 느껴지면 높은 점수를 주고, 단순 의견 또는 반복 이슈가 아니면 낮은 점수를 주라. "
+        "결과는 반드시 아래 예시처럼 JSON만 반환해라. "
+        "예시: {\"urgency\":0.97,\"reason\":\"1점 리뷰에 많은 추천수가 있고, 환불을 강하게 요청함\"} "
+        "예시: {\"urgency\":0.5,\"reason\":\"게임 시스템 건의로, 긴급 대응 필요는 낮음\"} "
         "코드블록, 설명, 다른 문구 없이 JSON만 반환.\n"
         f"리뷰 평점: {score}★, 추천수: {thumbs}\n리뷰: \"{content}\""
     )
-    resp = openai.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "예시처럼 JSON만 반환"},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.12,
-        max_tokens=120
-    )
-    out = resp.choices[0].message.content.strip()
     try:
+        resp = openai.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "예시처럼 JSON만 반환"},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.11,
+            max_tokens=120
+        )
+        out = resp.choices[0].message.content.strip()
         if out.startswith("```"):
             out = out.split("```")[1].strip()
         out = out.replace("'", "\"")
@@ -95,7 +82,7 @@ def get_llm_reason(row):
         js = json.loads(out)
         return js.get('urgency', 0.0), js.get('reason', '분석실패')
     except Exception:
-        return custom_urgency(score, thumbs), "긴급도 자동계산"
+        return 0.5, "분석실패"
 
 if uploaded_file:
     df = read_csv_with_encoding(uploaded_file)
@@ -114,7 +101,7 @@ if uploaded_file:
     urg, reasons = [], []
     with st.spinner("긴급도·이유 분석 중..."):
         for _, row in preview.iterrows():
-            u, r = get_llm_reason(row)
+            u, r = get_llm_urgency(row)
             urg.append(u)
             reasons.append(r)
     preview['urgency'] = urg
@@ -148,14 +135,13 @@ if uploaded_file:
         st.markdown("> **답변 가이드라인**\n- 공감(불편 인정)\n- 구체적 사과\n- 원인 설명(가능한 경우)\n- 조치 예정 or 고객센터 유도\n- 친근한 마무리\n")
         style = st.radio(
             "답변 스타일을 선택하세요:",
-            ['공감 중심', '문제 원인 상세', '고객센터 안내', '최대한 자세히'],
+            ['공감 중심', '문제 원인 상세', '고객센터 안내'],
             horizontal=True
         )
         style_dict = {
             '공감 중심': '이용자의 감정에 최대한 공감하고 불편을 인정하는 답변',
             '문제 원인 상세': '문제 원인에 대해 상세히 설명하는 답변',
-            '고객센터 안내': '문제를 고객센터에서 도와드릴 수 있다는 안내를 중심으로 작성',
-            '최대한 자세히': '최대한 자세하게 문제 해결 안내 및 후속조치 안내'
+            '고객센터 안내': '문제를 고객센터에서 도와드릴 수 있다는 안내를 중심으로 작성'
         }
         selected_guide = style_dict[style]
         answer = ""
@@ -164,7 +150,8 @@ if uploaded_file:
                 f"리뷰: \"{review_content}\"\n"
                 f"답변 스타일: {selected_guide}\n"
                 "위 리뷰에 대해 CS 담당자 입장에서 공식적이고 중립적으로 답변하라. "
-                "공감, 사과, 해결방안, 후속 안내를 포함하며, 은어/비속어는 공식적으로 순화해라."
+                "공감, 사과, 해결방안, 후속 안내를 포함하며, "
+                "'현질', '현금박치기', '쪼렙', '오지게' 등 은어·비속어·비공식/은유적 표현은 반드시 '유료 결제', '과금', '유료 아이템 구매', '초보자', '매우' 등 공식적이고 중립적인 용어로 순화하여 답변하라."
             )
             resp2 = openai.chat.completions.create(
                 model="gpt-4o-mini",
@@ -172,13 +159,13 @@ if uploaded_file:
                     {"role": "system", "content": "너는 게임 CS 담당자이며 답변 시 반드시 비공식어를 순화할 것."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.23,
+                temperature=0.22,
                 max_tokens=350
             )
             answer = resp2.choices[0].message.content
         st.text_area("추천 답변 예시", value=answer, height=210)
 
-        st.subheader("리뷰 통계")
+    st.subheader("리뷰 통계")
     st.bar_chart(preview['score'].value_counts().sort_index())
 
     st.subheader("문제 범주 분포")
