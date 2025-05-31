@@ -111,9 +111,37 @@ st.markdown("""
         font-size: 0.75rem;
         font-weight: 500;
         margin: 0.2rem;
-        background: #f8f9fa;
-        color: #495057;
-        border: 1px solid #e9ecef;
+    }
+    
+    .cat-bm { 
+        background: #e8f4f8; 
+        color: #2c5282; 
+        border: 1px solid #bee3f8;
+    }
+    .cat-tech { 
+        background: #f0e6ff; 
+        color: #553c9a; 
+        border: 1px solid #d6bcfa;
+    }
+    .cat-ops { 
+        background: #f0fff4; 
+        color: #22543d; 
+        border: 1px solid #9ae6b4;
+    }
+    .cat-ux { 
+        background: #fffaf0; 
+        color: #c05621; 
+        border: 1px solid #fbb6ce;
+    }
+    .cat-content { 
+        background: #fdf2f8; 
+        color: #97266d; 
+        border: 1px solid #f3a8d1;
+    }
+    .cat-etc { 
+        background: #f7fafc; 
+        color: #4a5568; 
+        border: 1px solid #e2e8f0;
     }
 </style>
 """, unsafe_allow_html=True)
