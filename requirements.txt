@@ -1,5 +1,5 @@
 streamlit
-openai
 pandas
-matplotlib
+openai
 python-dotenv
+matplotlib
