@@ -2,14 +2,165 @@ import streamlit as st
 import pandas as pd
 import openai
 import json
+import plotly.express as px
+import plotly.graph_objects as go
+from datetime import datetime
 
+# 페이지 설정
+st.set_page_config(
+    page_title="리뷰케어 대시보드", 
+    page_icon="🎯", 
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# 커스텀 CSS 스타일
+st.markdown("""
+<style>
+    /* 메인 컨테이너 스타일 */
+    .main > div {
+        padding-top: 2rem;
+    }
+    
+    /* 헤더 스타일 */
+    .main-header {
+        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        padding: 2rem;
+        border-radius: 15px;
+        color: white;
+        text-align: center;
+        margin-bottom: 2rem;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    }
+    
+    /* 카드 스타일 */
+    .metric-card {
+        background: white;
+        padding: 1.5rem;
+        border-radius: 12px;
+        border: 1px solid #e0e6ed;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        text-align: center;
+        margin: 0.5rem 0;
+    }
+    
+    /* 리뷰 카드 스타일 */
+    .review-card {
+        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+        padding: 1.5rem;
+        border-radius: 12px;
+        margin: 1rem 0;
+        border-left: 4px solid #667eea;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    
+    .urgent-review {
+        background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%);
+        border-left: 4px solid #ff6b6b;
+    }
+    
+    .medium-review {
+        background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%);
+        border-left: 4px solid #ffa726;
+    }
+    
+    .low-review {
+        background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
+        border-left: 4px solid #26c6da;
+    }
+    
+    /* 버튼 스타일 */
+    .stButton > button {
+        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        border-radius: 8px;
+        padding: 0.5rem 1rem;
+        font-weight: 600;
+        transition: transform 0.2s;
+    }
+    
+    .stButton > button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    }
+    
+    /* 사이드바 스타일 */
+    .css-1d391kg {
+        background: linear-gradient(180deg, #667eea 0%, #764ba2 100%);
+    }
+    
+    /* 메트릭 값 스타일 */
+    .metric-value {
+        font-size: 2.5rem;
+        font-weight: bold;
+        color: #667eea;
+    }
+    
+    .metric-label {
+        font-size: 0.9rem;
+        color: #666;
+        font-weight: 500;
+    }
+    
+    /* 범주 태그 스타일 */
+    .category-tag {
+        display: inline-block;
+        padding: 0.3rem 0.8rem;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        margin: 0.2rem;
+    }
+    
+    .cat-bm { background: #e3f2fd; color: #1976d2; }
+    .cat-tech { background: #f3e5f5; color: #7b1fa2; }
+    .cat-ops { background: #e8f5e8; color: #388e3c; }
+    .cat-ux { background: #fff3e0; color: #f57c00; }
+    .cat-content { background: #fce4ec; color: #c2185b; }
+    .cat-etc { background: #f5f5f5; color: #616161; }
+</style>
+""", unsafe_allow_html=True)
+
+# API 키 설정
 OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
 openai.api_key = OPENAI_API_KEY
 
-st.set_page_config(page_title="리뷰케어 긴급 리뷰 대시보드", layout="wide")
-st.title("리뷰케어: 긴급도·추천수·범주 리뷰 모니터링 & 자동 답변")
+# 헤더
+st.markdown("""
+<div class="main-header">
+    <h1>🎯 리뷰케어 대시보드</h1>
+    <p>AI 기반 긴급도 분석 · 카테고리 분류 · 자동 답변 생성</p>
+</div>
+""", unsafe_allow_html=True)
 
-uploaded_file = st.file_uploader("CSV 파일 업로드 (필수: content, score, thumbsUpCount, at)", type=['csv'])
+# 사이드바
+with st.sidebar:
+    st.markdown("### 📊 분석 설정")
+    
+    uploaded_file = st.file_uploader(
+        "CSV 파일 업로드", 
+        type=['csv'],
+        help="필수 컬럼: content, score, thumbsUpCount, at"
+    )
+    
+    if uploaded_file:
+        st.success("✅ 파일 업로드 완료!")
+        
+        N = st.slider(
+            "분석할 리뷰 개수", 
+            min_value=1, 
+            max_value=50, 
+            value=10,
+            help="더 많은 리뷰를 분석할수록 시간이 오래 걸립니다"
+        )
+        
+        st.markdown("### 🎨 스타일 설정")
+        answer_style = st.selectbox(
+            "답변 스타일",
+            ['공감 중심', '문제 원인 상세', '고객센터 안내'],
+            help="생성될 답변의 톤앤매너를 선택하세요"
+        )
 
 def read_csv_with_encoding(file):
     for enc in ["utf-8-sig", "utf-8", "cp949", "euc-kr", "latin1"]:
@@ -20,7 +171,7 @@ def read_csv_with_encoding(file):
                 return df
         except Exception:
             continue
-    st.error("CSV 파일 인코딩을 알 수 없거나 데이터를 읽지 못했습니다.")
+    st.error("❌ CSV 파일을 읽을 수 없습니다.")
     return None
 
 @st.cache_data(show_spinner=False)
@@ -84,92 +235,463 @@ def get_llm_urgency(row):
     except Exception:
         return 0.5, "분석실패"
 
+def get_urgency_class(urgency):
+    if urgency >= 0.7:
+        return "urgent-review"
+    elif urgency >= 0.4:
+        return "medium-review"
+    else:
+        return "low-review"
+
+def get_category_class(category):
+    category_classes = {
+        'BM': 'cat-bm',
+        '기술': 'cat-tech',
+        '운영': 'cat-ops',
+        'UX': 'cat-ux',
+        '콘텐츠': 'cat-content',
+        '기타': 'cat-etc'
+    }
+    return category_classes.get(category, 'cat-etc')
+
 if uploaded_file:
     df = read_csv_with_encoding(uploaded_file)
+    
     if df is None or df.empty or 'content' not in df.columns or 'score' not in df.columns or 'thumbsUpCount' not in df.columns:
-        st.error("CSV 파일에 데이터가 없거나 필수 컬럼이 없습니다. (필수: content, score, thumbsUpCount, at)")
+        st.error("❌ 필수 컬럼이 없습니다. (필수: content, score, thumbsUpCount, at)")
         st.stop()
+    
     if 'at' in df.columns:
         df['at'] = pd.to_datetime(df['at'], errors='coerce')
     else:
         df['at'] = pd.Timestamp.now()
 
-    st.info("긴급도/추천수/범주 분석을 시작합니다.")
-    N = st.slider("긴급도 산출할 리뷰 개수(최대 50개 권장)", 1, min(50, len(df)), 10)
-    preview = df.head(N).copy()
-    preview['category'] = extract_category(preview['content'])
-    urg, reasons = [], []
-    with st.spinner("긴급도·이유 분석 중..."):
-        for _, row in preview.iterrows():
+    # 메트릭 카드들
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-value">{len(df):,}</div>
+            <div class="metric-label">📝 총 리뷰 수</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        avg_score = df['score'].mean()
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-value">{avg_score:.1f}★</div>
+            <div class="metric-label">⭐ 평균 별점</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        total_thumbs = df['thumbsUpCount'].sum()
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-value">{total_thumbs:,}</div>
+            <div class="metric-label">👍 총 추천수</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col4:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-value">{N}</div>
+            <div class="metric-label">🔍 분석 대상</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # 분석 시작
+    with st.spinner("🤖 AI가 리뷰를 분석하고 있습니다..."):
+        preview = df.head(N).copy()
+        
+        # 진행률 표시
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        # 카테고리 분석
+        status_text.text("📂 카테고리 분류 중...")
+        preview['category'] = extract_category(preview['content'])
+        progress_bar.progress(50)
+        
+        # 긴급도 분석
+        status_text.text("🚨 긴급도 분석 중...")
+        urg, reasons = [], []
+        for i, (_, row) in enumerate(preview.iterrows()):
             u, r = get_llm_urgency(row)
             urg.append(u)
             reasons.append(r)
-    preview['urgency'] = urg
-    preview['reason'] = reasons
-
+            progress_bar.progress(50 + (i + 1) * 50 // len(preview))
+        
+        preview['urgency'] = urg
+        preview['reason'] = reasons
+        progress_bar.progress(100)
+        status_text.text("✅ 분석 완료!")
+    
     preview = preview.sort_values('urgency', ascending=False).reset_index(drop=True)
     criticals = preview.head(10)
-
-    st.subheader("긴급도+추천수+범주 상위 리뷰 (Top 10)")
-    col1, col2 = st.columns([2, 3])
-    with col1:
+    
+    st.markdown("## 🚨 긴급도 상위 리뷰 Top 10")
+    
+    # 탭으로 구분
+    tab1, tab2, tab3 = st.tabs(["📋 리뷰 목록", "💬 답변 생성", "📊 통계 분석"])
+    
+    with tab1:
         for idx, row in criticals.iterrows():
-            st.markdown(f"**{row['at']} - {str(row['score'])}★ / 추천수:{str(row['thumbsUpCount'])}**")
-            st.write(str(row['content']))
-            st.caption(
-                f"긴급도: {row['urgency']:.2f} / 문제범주: {row['category']}"
+            urgency_class = get_urgency_class(row['urgency'])
+            category_class = get_category_class(row['category'])
+            
+            # 긴급도에 따른 이모지
+            urgency_emoji = "🔴" if row['urgency'] >= 0.7 else "🟡" if row['urgency'] >= 0.4 else "🟢"
+            
+            st.markdown(f"""
+            <div class="review-card {urgency_class}">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <div>
+                        <strong>{urgency_emoji} 긴급도: {row['urgency']:.2f}</strong>
+                        <span class="category-tag {category_class}">{row['category']}</span>
+                    </div>
+                    <div style="color: #666;">
+                        {str(row['score'])}★ | 👍 {str(row['thumbsUpCount'])}
+                    </div>
+                </div>
+                <div style="margin-bottom: 1rem; line-height: 1.6;">
+                    {str(row['content'])[:200]}{'...' if len(str(row['content'])) > 200 else ''}
+                </div>
+                <div style="font-size: 0.9rem; color: #666;">
+                    📅 {row['at'].strftime('%Y-%m-%d %H:%M') if pd.notna(row['at']) else 'N/A'} | 
+                    💭 {row['reason']}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+    
+    with tab2:
+        st.markdown("### 💬 AI 답변 생성기")
+        
+        col1, col2 = st.columns([1, 2])
+        
+        with col1:
+            selected_review_idx = st.selectbox(
+                "답변할 리뷰 선택",
+                range(len(criticals)),
+                format_func=lambda x: f"#{x+1} - 긴급도 {criticals.iloc[x]['urgency']:.2f}"
             )
-            st.divider()
-
-    with col2:
-        sel_idx = st.number_input(
-            "몇 번째 리뷰에 답변할까요? (1~10)", 
-            min_value=1, 
-            max_value=min(10, len(criticals)), 
-            value=1, step=1
-        ) - 1
-        selected = criticals.iloc[sel_idx]
-        review_content = str(selected['content'])
-        st.markdown("### 리뷰\n" + review_content)
-        st.markdown(f"> **문제 범주:** {selected['category']}")
-        st.markdown("> **답변 가이드라인**\n- 공감(불편 인정)\n- 구체적 사과\n- 원인 설명(가능한 경우)\n- 조치 예정 or 고객센터 유도\n- 친근한 마무리\n")
-        style = st.radio(
-            "답변 스타일을 선택하세요:",
-            ['공감 중심', '문제 원인 상세', '고객센터 안내'],
-            horizontal=True
-        )
-        style_dict = {
-            '공감 중심': '이용자의 감정에 최대한 공감하고 불편을 인정하는 답변',
-            '문제 원인 상세': '문제 원인에 대해 상세히 설명하는 답변',
-            '고객센터 안내': '문제를 고객센터에서 도와드릴 수 있다는 안내를 중심으로 작성'
-        }
-        selected_guide = style_dict[style]
-        answer = ""
-        if st.button("선택한 스타일로 답변 생성"):
-            prompt = (
-                f"리뷰: \"{review_content}\"\n"
-                f"답변 스타일: {selected_guide}\n"
-                "위 리뷰에 대해 CS 담당자 입장에서 공식적이고 중립적으로 답변하라. "
-                "공감, 사과, 해결방안, 후속 안내를 포함하며, "
-                "'현질', '현금박치기', '쪼렙', '오지게' 등 은어·비속어·비공식/은유적 표현은 반드시 '유료 결제', '과금', '유료 아이템 구매', '초보자', '매우' 등 공식적이고 중립적인 용어로 순화하여 답변하라."
+        
+        with col2:
+            if st.button("✨ AI 답변 생성", use_container_width=True):
+                selected = criticals.iloc[selected_review_idx]
+                review_content = str(selected['content'])
+                
+                style_dict = {
+                    '공감 중심': '이용자의 감정에 최대한 공감하고 불편을 인정하는 답변',
+                    '문제 원인 상세': '문제 원인에 대해 상세히 설명하는 답변',
+                    '고객센터 안내': '문제를 고객센터에서 도와드릴 수 있다는 안내를 중심으로 작성'
+                }
+                
+                prompt = (
+                    f"리뷰: \"{review_content}\"\n"
+                    f"답변 스타일: {style_dict[answer_style]}\n"
+                    "위 리뷰에 대해 CS 담당자 입장에서 공식적이고 중립적으로 답변하라. "
+                    "공감, 사과, 해결방안, 후속 안내를 포함하며, "
+                    "'현질', '현금박치기', '쪼렙', '오지게' 등 은어·비속어·비공식/은유적 표현은 반드시 '유료 결제', '과금', '유료 아이템 구매', '초보자', '매우' 등 공식적이고 중립적인 용어로 순화하여 답변하라."
+                )
+                
+                with st.spinner("🤖 답변 생성 중..."):
+                    resp = openai.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[
+                            {"role": "system", "content": "너는 게임 CS 담당자이며 답변 시 반드시 비공식어를 순화할 것."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        temperature=0.1,
+                        max_tokens=500
+                    )
+                    answer = resp.choices[0].message.content
+                    
+                    st.markdown("#### 📝 생성된 답변")
+                    st.markdown(f"""
+                    <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 10px; border-left: 4px solid #28a745;">
+                        {answer}
+                    </div>
+                    """, unsafe_allow_html=True)
+    
+    with tab3:
+        st.markdown("### 📊 분석 결과 통계")
+        
+        # 서브탭으로 구분
+        subtab1, subtab2, subtab3 = st.tabs(["📈 기본 통계", "📅 날짜별 분석", "🔍 심화 분석"])
+        
+        with subtab1:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # 별점 분포
+                score_counts = preview['score'].value_counts().sort_index()
+                fig_score = px.bar(
+                    x=score_counts.index, 
+                    y=score_counts.values,
+                    title="⭐ 별점 분포",
+                    labels={'x': '별점', 'y': '리뷰 수'},
+                    color=score_counts.values,
+                    color_continuous_scale='RdYlGn_r'
+                )
+                fig_score.update_layout(
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    font_family="Arial"
+                )
+                st.plotly_chart(fig_score, use_container_width=True)
+            
+            with col2:
+                # 카테고리 분포
+                cat_counts = preview['category'].value_counts()
+                fig_cat = px.pie(
+                    values=cat_counts.values,
+                    names=cat_counts.index,
+                    title="📂 문제 범주 분포",
+                    color_discrete_sequence=px.colors.qualitative.Set3
+                )
+                fig_cat.update_layout(
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    font_family="Arial"
+                )
+                st.plotly_chart(fig_cat, use_container_width=True)
+            
+            # 긴급도 히스토그램
+            fig_urgency = px.histogram(
+                preview, 
+                x='urgency', 
+                nbins=20,
+                title="🚨 긴급도 분포",
+                labels={'urgency': '긴급도', 'count': '리뷰 수'},
+                color_discrete_sequence=['#667eea']
             )
-            resp2 = openai.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": "너는 게임 CS 담당자이며 답변 시 반드시 비공식어를 순화할 것."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.1,
-                max_tokens=500
+            fig_urgency.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+                font_family="Arial"
             )
-            answer = resp2.choices[0].message.content
-        st.text_area("추천 답변 예시", value=answer, height=210)
-
-    st.subheader("리뷰 통계")
-    st.bar_chart(preview['score'].value_counts().sort_index())
-
-    st.subheader("문제 범주 분포")
-    st.bar_chart(preview['category'].value_counts())
+            st.plotly_chart(fig_urgency, use_container_width=True)
+        
+        with subtab2:
+            st.markdown("#### 📅 시간대별 리뷰 분석")
+            
+            # 날짜 데이터 처리
+            preview_with_date = preview.copy()
+            preview_with_date['date'] = pd.to_datetime(preview_with_date['at']).dt.date
+            preview_with_date['hour'] = pd.to_datetime(preview_with_date['at']).dt.hour
+            preview_with_date['weekday'] = pd.to_datetime(preview_with_date['at']).dt.day_name()
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # 일별 리뷰 수 및 평균 긴급도
+                daily_stats = preview_with_date.groupby('date').agg({
+                    'urgency': ['count', 'mean'],
+                    'score': 'mean'
+                }).round(2)
+                daily_stats.columns = ['리뷰_수', '평균_긴급도', '평균_별점']
+                daily_stats = daily_stats.reset_index()
+                
+                # 일별 리뷰 수와 긴급도
+                fig_daily = go.Figure()
+                fig_daily.add_trace(go.Scatter(
+                    x=daily_stats['date'],
+                    y=daily_stats['리뷰_수'],
+                    mode='lines+markers',
+                    name='리뷰 수',
+                    line=dict(color='#667eea', width=3),
+                    yaxis='y'
+                ))
+                fig_daily.add_trace(go.Scatter(
+                    x=daily_stats['date'],
+                    y=daily_stats['평균_긴급도'],
+                    mode='lines+markers',
+                    name='평균 긴급도',
+                    line=dict(color='#ff6b6b', width=3),
+                    yaxis='y2'
+                ))
+                fig_daily.update_layout(
+                    title="📅 일별 리뷰 수 & 평균 긴급도",
+                    xaxis_title="날짜",
+                    yaxis=dict(title="리뷰 수", side="left"),
+                    yaxis2=dict(title="평균 긴급도", side="right", overlaying="y"),
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    font_family="Arial"
+                )
+                st.plotly_chart(fig_daily, use_container_width=True)
+            
+            with col2:
+                # 요일별 분포
+                weekday_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+                weekday_korean = ['월', '화', '수', '목', '금', '토', '일']
+                weekday_stats = preview_with_date.groupby('weekday')['urgency'].agg(['count', 'mean']).round(2)
+                weekday_stats = weekday_stats.reindex(weekday_order)
+                weekday_stats['weekday_kr'] = weekday_korean
+                
+                fig_weekday = px.bar(
+                    x=weekday_stats['weekday_kr'],
+                    y=weekday_stats['count'],
+                    title="📆 요일별 리뷰 수",
+                    labels={'x': '요일', 'y': '리뷰 수'},
+                    color=weekday_stats['mean'],
+                    color_continuous_scale='Reds'
+                )
+                fig_weekday.update_layout(
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    font_family="Arial"
+                )
+                st.plotly_chart(fig_weekday, use_container_width=True)
+            
+            # 시간대별 분포
+            hourly_stats = preview_with_date.groupby('hour').agg({
+                'urgency': ['count', 'mean']
+            }).round(2)
+            hourly_stats.columns = ['리뷰_수', '평균_긁급도']
+            hourly_stats = hourly_stats.reset_index()
+            
+            fig_hourly = px.line(
+                hourly_stats,
+                x='hour',
+                y='리뷰_수',
+                title="🕐 시간대별 리뷰 분포",
+                labels={'hour': '시간', '리뷰_수': '리뷰 수'},
+                markers=True
+            )
+            fig_hourly.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+                font_family="Arial"
+            )
+            st.plotly_chart(fig_hourly, use_container_width=True)
+            
+            # 날짜별 카테고리 히트맵
+            if len(daily_stats) > 1:
+                date_category = preview_with_date.groupby(['date', 'category']).size().unstack(fill_value=0)
+                
+                fig_heatmap = px.imshow(
+                    date_category.T,
+                    title="🗓️ 날짜별 카테고리 분포 히트맵",
+                    labels=dict(x="날짜", y="카테고리", color="리뷰 수"),
+                    color_continuous_scale='Blues'
+                )
+                fig_heatmap.update_layout(
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    font_family="Arial"
+                )
+                st.plotly_chart(fig_heatmap, use_container_width=True)
+        
+        with subtab3:
+            st.markdown("#### 🔍 심화 분석")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # 카테고리별 긴급도 박스플롯
+                fig_box = px.box(
+                    preview,
+                    x='category',
+                    y='urgency',
+                    title="📊 카테고리별 긴급도 분포",
+                    labels={'category': '카테고리', 'urgency': '긴급도'},
+                    color='category',
+                    color_discrete_sequence=px.colors.qualitative.Set3
+                )
+                fig_box.update_layout(
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    font_family="Arial"
+                )
+                st.plotly_chart(fig_box, use_container_width=True)
+                
+                # 카테고리별 평균 지표
+                category_stats = preview.groupby('category').agg({
+                    'urgency': 'mean',
+                    'score': 'mean',
+                    'thumbsUpCount': 'mean'
+                }).round(2)
+                
+                st.markdown("##### 📋 카테고리별 평균 지표")
+                st.dataframe(
+                    category_stats,
+                    column_config={
+                        "urgency": st.column_config.ProgressColumn(
+                            "평균 긴급도",
+                            help="카테고리별 평균 긴급도",
+                            min_value=0,
+                            max_value=1,
+                        ),
+                        "score": st.column_config.NumberColumn(
+                            "평균 별점",
+                            format="%.1f ⭐"
+                        ),
+                        "thumbsUpCount": st.column_config.NumberColumn(
+                            "평균 추천수",
+                            format="%.0f 👍"
+                        )
+                    },
+                    use_container_width=True
+                )
+            
+            with col2:
+                # 별점 vs 긴급도 산점도
+                fig_scatter = px.scatter(
+                    preview,
+                    x='score',
+                    y='urgency',
+                    size='thumbsUpCount',
+                    color='category',
+                    title="⭐ 별점 vs 긴급도 관계",
+                    labels={'score': '별점', 'urgency': '긴급도', 'thumbsUpCount': '추천수'},
+                    hover_data=['category']
+                )
+                fig_scatter.update_layout(
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    font_family="Arial"
+                )
+                st.plotly_chart(fig_scatter, use_container_width=True)
+                
+                # 추천수 구간별 분석
+                preview['thumbs_range'] = pd.cut(
+                    preview['thumbsUpCount'], 
+                    bins=[0, 10, 50, 100, float('inf')], 
+                    labels=['~10', '11~50', '51~100', '100+']
+                )
+                
+                thumbs_stats = preview.groupby('thumbs_range').agg({
+                    'urgency': 'mean',
+                    'score': 'mean'
+                }).round(2)
+                
+                fig_thumbs = px.bar(
+                    x=thumbs_stats.index,
+                    y=thumbs_stats['urgency'],
+                    title="👍 추천수 구간별 평균 긴급도",
+                    labels={'x': '추천수 구간', 'y': '평균 긴급도'},
+                    color=thumbs_stats['urgency'],
+                    color_continuous_scale='Reds'
+                )
+                fig_thumbs.update_layout(
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    font_family="Arial"
+                )
+                st.plotly_chart(fig_thumbs, use_container_width=True)
 
 else:
-    st.info("CSV 파일을 업로드하면 자동으로 분석됩니다.")
+    # 빈 상태 표시
+    st.markdown("""
+    <div style="text-align: center; padding: 4rem; color: #666;">
+        <div style="font-size: 4rem; margin-bottom: 1rem;">📂</div>
+        <h3>CSV 파일을 업로드해주세요</h3>
+        <p>리뷰 데이터 분석을 시작하려면 왼쪽 사이드바에서 파일을 업로드하세요.</p>
+        <small>필수 컬럼: content, score, thumbsUpCount, at</small>
+    </div>
+    """, unsafe_allow_html=True)
